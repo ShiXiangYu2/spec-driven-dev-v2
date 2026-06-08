@@ -1,0 +1,65 @@
+{
+  "skill_name": "spec-driven-dev",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我要做一个新的博客系统，用 Next.js + Prisma，帮我用规范驱动开发的方法来规划",
+      "expected_output": "触发项目诊断，问3个问题（项目阶段/团队规模/AI工具），然后推荐Spec-Kit或spec-first，生成project-spec-template.md"
+    },
+    {
+      "id": 2,
+      "prompt": "我的已有项目要加一个用户评论功能，后端是Node.js，帮我写个spec",
+      "expected_output": "推荐OpenSpec方案，使用feature-spec-template.md生成四要素（What/Why/Constraints/Non-Goals），Non-Goals至少3条，包含接口设计和任务拆解，生成执行计划"
+    },
+    {
+      "id": 3,
+      "prompt": "我想用 spec-first 的方法管理我的项目，不想装工具",
+      "expected_output": "推荐spec-first无工具方案，生成AGENTS.md模板，给出最小可行方案，提供升级路径说明"
+    },
+    {
+      "id": 4,
+      "prompt": "帮我用 OpenSpec + Superpowers 开发一个用户登录功能",
+      "expected_output": "输出黄金搭档完整流程：OpenSpec初始化→创建变更→快进→补Non-Goals→Superpowers执行→归档，包含具体命令，生成执行计划"
+    },
+    {
+      "id": 5,
+      "prompt": "我的项目数据库查询太慢了，要做重构，帮我写个变更spec",
+      "expected_output": "使用change-spec-template.md，包含当前状态/目标状态/变更范围/影响评估/回滚方案/Non-Goals/代码变更清单"
+    },
+    {
+      "id": 6,
+      "prompt": "帮我写个 AGENTS.md",
+      "expected_output": "直接使用agents-md-template.md，快速生成项目规范文件"
+    },
+    {
+      "id": 7,
+      "prompt": "不用这么麻烦，直接帮我写代码实现用户登录",
+      "expected_output": "尊重用户节奏，但至少口头确认一次Non-Goals，守住范围蔓延底线后再写代码"
+    },
+    {
+      "id": 8,
+      "prompt": "我想做个电商网站",
+      "expected_output": "识别需求模糊，进入规范策略顾问模式给出3个方向（轻量/标准/严格），或先问3个澄清问题"
+    },
+    {
+      "id": 9,
+      "prompt": "帮我检查一下我的spec和代码是否一致",
+      "expected_output": "调用check-code-consistency.py检查spec与代码库的一致性，输出冲突/警告报告"
+    },
+    {
+      "id": 10,
+      "prompt": "我的项目跑了两个月了，帮我看看spec有没有过时",
+      "expected_output": "调用detect-spec-drift.py检测spec漂移，输出Non-Goals漂移/接口漂移/技术约束漂移报告"
+    },
+    {
+      "id": 11,
+      "prompt": "我的环境能装什么SDD工具？",
+      "expected_output": "调用check-env.py检测环境，根据检测结果智能推荐可用工具，给出降级路径"
+    },
+    {
+      "id": 12,
+      "prompt": "spec已经写好了，帮我生成执行计划",
+      "expected_output": "调用generate-execution-plan.py从spec生成执行计划，包含文件变更清单+任务拆解+验证点+会话切换指南"
+    }
+  ]
+}

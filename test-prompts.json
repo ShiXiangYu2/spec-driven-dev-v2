@@ -1,0 +1,35 @@
+{
+  "skill_name": "spec-driven-dev",
+  "prompts": [
+    {
+      "id": 1,
+      "prompt": "我要做一个新的博客系统，用 Next.js + Prisma，帮我用规范驱动开发的方法来规划",
+      "expected_behavior": "触发项目诊断，问3个问题（项目阶段/团队规模/AI工具），然后推荐Spec-Kit或spec-first，生成project-spec-template.md"
+    },
+    {
+      "id": 2,
+      "prompt": "我的已有项目要加一个用户评论功能，后端是Node.js，帮我写个spec",
+      "expected_behavior": "推荐OpenSpec，使用feature-spec-template.md生成What/Why/Constraints/Non-Goals四要素，包含至少3条Non-Goals"
+    },
+    {
+      "id": 3,
+      "prompt": "我想用 spec-first 的方法管理我的项目，不想装工具",
+      "expected_behavior": "推荐spec-first方案，生成AGENTS.md模板，给出最小可行方案"
+    },
+    {
+      "id": 4,
+      "prompt": "帮我用 OpenSpec + Superpowers 开发一个用户登录功能",
+      "expected_behavior": "输出黄金搭档完整流程：OpenSpec初始化→创建变更→快进→补Non-Goals→Superpowers执行→归档，包含具体操作命令"
+    },
+    {
+      "id": 5,
+      "prompt": "我的项目数据库查询太慢了，要做重构，帮我写个变更spec",
+      "expected_behavior": "使用change-spec-template.md，包含当前状态/目标状态/变更范围/影响评估/回滚方案/Non-Goals"
+    },
+    {
+      "id": 6,
+      "prompt": "帮我写个 AGENTS.md",
+      "expected_behavior": "直接使用agents-md-template.md，快速生成项目规范文件"
+    }
+  ]
+}

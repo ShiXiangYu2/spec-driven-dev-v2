@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec-Driven Development 演示</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0A0A12; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ======== animations.jsx 内联 ======== -->
+<script type="text/babel">
+(function() {
+  const { createContext, useContext, useState, useEffect, useRef, useCallback } = React;
+  const TimeContext = createContext({ time: 0, duration: 10, playing: false });
+  const SpriteContext = createContext(null);
+
+  const Easing = {
+    linear: t => t,
+    easeIn: t => t * t,
+    easeOut: t => 1 - (1 - t) * (1 - t),
+    easeInOut: t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+    expoOut: t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+    overshoot: t => {
+      const c1 = 1.70158, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    },
+    spring: t => {
+      const c = (2 * Math.PI) / 3;
+      return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c) + 1;
+    },
+  };
+
+  function interpolate(t, input, output, easing) {
+    const [inStart, inEnd] = input;
+    const [outStart, outEnd] = output;
+    if (t <= inStart) return outStart;
+    if (t >= inEnd) return outEnd;
+    let progress = (t - inStart) / (inEnd - inStart);
+    if (easing) progress = easing(progress);
+    return outStart + (outEnd - outStart) * progress;
+  }
+
+  function useTime() { return useContext(TimeContext).time; }
+  function useSprite() {
+    const sprite = useContext(SpriteContext);
+    return sprite || { t: 0, elapsed: 0, duration: 0 };
+  }
+
+  const stageStyles = {
+    wrapper: { position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, sans-serif' },
+    stageHolder: { flex: 1, position: 'relative', overflow: 'hidden' },
+    canvas: { position: 'absolute', top: '50%', left: '50%', transformOrigin: 'center center', background: '#111', overflow: 'hidden' },
+    controls: { position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 16, color: '#fff', fontSize: 12, zIndex: 100 },
+    button: { background: 'none', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12 },
+    timeDisplay: { fontFamily: 'ui-monospace, monospace', fontVariantNumeric: 'tabular-nums', minWidth: 90 },
+    scrubber: { flex: 1, height: 4, background: 'rgba(255,255,255,0.2)', borderRadius: 2, position: 'relative', cursor: 'pointer' },
+    scrubberFill: { position: 'absolute', top: 0, left: 0, height: '100%', background: '#fff', borderRadius: 2, pointerEvents: 'none' },
+    scrubberHandle: { position: 'absolute', top: '50%', width: 12, height: 12, background: '#fff', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' },
+  };
+
+  function Stage({ duration = 10, width = 1920, height = 1080, loop = true, children, bgColor = '#fff' }) {
+    const [time, setTime] = useState(0);
+    const [playing, setPlaying] = useState(true);
+    const [scale, setScale] = useState(1);
+    const rafRef = useRef(null);
+    const effectiveLoop = (typeof window !== 'undefined' && window.__recording) ? false : loop;
+
+    useEffect(() => {
+      function updateScale() {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight - 56;
+        const s = Math.min(vw / width, vh / height);
+        setScale(s);
+      }
+      updateScale();
+      window.addEventListener('resize', updateScale);
+      return () => window.removeEventListener('resize', updateScale);
+    }, [width, height]);
+
+    useEffect(() => {
+      if (!playing) return;
+      let cancelled = false;
+      let last = null;
+      function tick(now) {
+        if (cancelled) return;
+        if (last === null) {
+          last = now;
+          if (typeof window !== 'undefined') window.__ready = true;
+        }
+        const delta = (now - last) / 1000;
+        last = now;
+        setTime(prev => {
+          const next = prev + delta;
+          if (next >= duration) return effectiveLoop ? 0 : duration - 0.001;
+          return next;
+        });
+        rafRef.current = requestAnimationFrame(tick);
+      }
+      const startAfterFonts = () => {
+        if (cancelled) return;
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(startAfterFonts);
+      } else {
+        startAfterFonts();
+      }
+      return () => { cancelled = true; cancelAnimationFrame(rafRef.current); };
+    }, [playing, duration, effectiveLoop]);
+
+    const handleScrub = useCallback((e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      setTime(Math.max(0, Math.min(duration, ratio * duration)));
+    }, [duration]);
+    const handleSeek = useCallback((e) => { handleScrub(e); setPlaying(false); }, [handleScrub]);
+    const progress = time / duration;
+    const ctx = { time, duration, playing, setPlaying, setTime };
+    const canvasStyle = { ...stageStyles.canvas, width, height, background: bgColor, transform: `translate(-50%, -50%) scale(${scale})` };
+
+    return (
+      <TimeContext.Provider value={ctx}>
+        <div style={stageStyles.wrapper}>
+          <div style={stageStyles.stageHolder}>
+            <div style={canvasStyle}>{children}</div>
+          </div>
+          <div className="no-record" style={stageStyles.controls}>
+            <button style={stageStyles.button} onClick={() => setPlaying(p => !p)}>{playing ? 'Pause' : 'Play'}</button>
+            <button style={stageStyles.button} onClick={() => setTime(0)}>Reset</button>
+            <div style={stageStyles.timeDisplay}>{time.toFixed(2)}s / {duration.toFixed(2)}s</div>
+            <div style={stageStyles.scrubber} onMouseDown={handleSeek}>
+              <div style={{ ...stageStyles.scrubberFill, width: `${progress * 100}%` }} />
+              <div style={{ ...stageStyles.scrubberHandle, left: `${progress * 100}%` }} />
+            </div>
+          </div>
+        </div>
+      </TimeContext.Provider>
+    );
+  }
+
+  function Sprite({ start = 0, end, children, style }) {
+    const { time } = useContext(TimeContext);
+    const actualEnd = end == null ? Infinity : end;
+    if (time < start || time >= actualEnd) return null;
+    const duration = actualEnd - start;
+    const elapsed = time - start;
+    const t = duration === 0 ? 1 : Math.max(0, Math.min(1, elapsed / duration));
+    const spriteValue = { t, elapsed, duration, start, end: actualEnd };
+    return (
+      <SpriteContext.Provider value={spriteValue}>
+        <div style={{ position: 'absolute', inset: 0, ...style }}>{children}</div>
+      </SpriteContext.Provider>
+    );
+  }
+
+  if (typeof window !== 'undefined') {
+    window.Animations = { Stage, Sprite, useTime, useSprite, Easing, interpolate };
+  }
+})();
+</script>
+
+<!-- ======== 主动画 ======== -->
+<script type="text/babel">
+const { Stage, Sprite, useTime, useSprite, Easing, interpolate } = window.Animations;
+
+const DURATION = 75;
+const BG = '#0A0A12';
+const ACCENT = '#00D4AA';
+const ACCENT_DIM = 'rgba(0,212,170,0.15)';
+const TEXT = '#F5F5F0';
+const TEXT_DIM = '#888888';
+const TEXT_MUTED = '#555555';
+const CARD_BG = 'rgba(255,255,255,0.04)';
+const CARD_BORDER = 'rgba(255,255,255,0.08)';
+const RED = '#FF4444';
+const RED_DIM = 'rgba(255,68,68,0.12)';
+
+const serif = "'Source Serif 4', 'Noto Serif SC', serif";
+const mono = "'JetBrains Mono', monospace";
+const sans = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+// ═══════ 通用动画组件 ═══════
+
+function FadeIn({ children, delay = 0, duration = 0.5, fromY = 30, style = {} }) {
+  const { t } = useSprite();
+  const p = interpolate(t, [delay, delay + duration], [0, 1], Easing.expoOut);
+  const y = interpolate(t, [delay, delay + duration], [fromY, 0], Easing.expoOut);
+  const o = interpolate(t, [delay, delay + duration * 0.6], [0, 1], Easing.expoOut);
+  return <div style={{ opacity: o, transform: `translateY(${y}px)`, ...style }}>{children}</div>;
+}
+
+function SlideIn({ children, from = 'bottom', delay = 0, duration = 0.5, style = {} }) {
+  const { t } = useSprite();
+  const p = interpolate(t, [delay, delay + duration], [0, 1], Easing.expoOut);
+  const dirs = { left: [-60, 0], right: [60, 0], top: [0, -40], bottom: [0, 40] };
+  const [ox, oy] = dirs[from] || [0, 40];
+  const x = interpolate(t, [delay, delay + duration], [ox, 0], Easing.expoOut);
+  const y = interpolate(t, [delay, delay + duration], [oy, 0], Easing.expoOut);
+  return <div style={{ opacity: p, transform: `translate(${x}px, ${y}px)`, ...style }}>{children}</div>;
+}
+
+function CountUp({ from = 0, to = 100, prefix = '', suffix = '', delay = 0 }) {
+  const { t } = useSprite();
+  const p = interpolate(t, [delay, delay + 0.6], [0, 1], Easing.expoOut);
+  const v = Math.floor(from + (to - from) * p);
+  return <span>{prefix}{v}{suffix}</span>;
+}
+
+function GlowLine({ delay = 0, width: w = 200 }) {
+  const { t } = useSprite();
+  const p = interpolate(t, [delay, delay + 0.8], [0, 1], Easing.expoOut);
+  return (
+    <div style={{
+      width: w * p, height: 1,
+      background: `linear-gradient(90deg, transparent, ${ACCENT}, transparent)`,
+      margin: '16px auto',
+    }} />
+  );
+}
+
+// ═══════ 场景组件 ═══════
+
+// ── Scene 1: 开场问题 (0-12s) ──
+function SceneChaos() {
+  const { t } = useSprite();
+  const globalT = useTime();
+  // 混沌代码碎片
+  const fragments = [
+    { text: 'function login() {', x: 140, y: 200, rot: -8, delay: 0.1 },
+    { text: '  // TODO: fix this', x: 1200, y: 350, rot: 5, delay: 0.2 },
+    { text: 'if (user) { ... }', x: 200, y: 600, rot: 3, delay: 0.15 },
+    { text: 'import { auth } from "..."', x: 1300, y: 680, rot: -4, delay: 0.25 },
+    { text: '// 这里要改', x: 400, y: 420, rot: 7, delay: 0.3 },
+    { text: 'const token = ???', x: 1050, y: 240, rot: -6, delay: 0.35 },
+    { text: 'FIXME: 逻辑混乱', x: 650, y: 520, rot: 2, delay: 0.2 },
+    { text: 'router.push("/")', x: 300, y: 750, rot: -3, delay: 0.4 },
+    { text: '// 等后端给接口', x: 1150, y: 800, rot: 6, delay: 0.3 },
+  ];
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', fontFamily: sans }}>
+      {/* 标题 */}
+      <FadeIn delay={0} duration={0.6}>
+        <div style={{
+          position: 'absolute', top: 80, left: 0, right: 0, textAlign: 'center',
+          fontFamily: serif, fontSize: 64, fontWeight: 700, color: TEXT,
+          letterSpacing: '-0.02em',
+        }}>
+          混乱的开发
+        </div>
+      </FadeIn>
+      <FadeIn delay={0.3} duration={0.5}>
+        <div style={{
+          position: 'absolute', top: 170, left: 0, right: 0, textAlign: 'center',
+          fontFamily: sans, fontSize: 24, color: TEXT_DIM, fontWeight: 400,
+        }}>
+          代码写了又删，需求改了又改，范围无限蔓延
+        </div>
+      </FadeIn>
+
+      {/* 代码碎片 */}
+      {fragments.map((f, i) => {
+        const ft = Math.max(0, t - f.delay);
+        const op = interpolate(ft, [0, 0.4], [0, 0.25], Easing.easeOut);
+        const yOff = interpolate(ft, [0, 0.6], [20, 0], Easing.easeOut);
+        return (
+          <div key={i} style={{
+            position: 'absolute',
+            left: f.x, top: f.y + yOff,
+            fontFamily: mono, fontSize: 18, color: '#FF6B6B',
+            opacity: op,
+            transform: `rotate(${f.rot}deg)`,
+            background: RED_DIM,
+            padding: '8px 16px',
+            borderRadius: 6,
+            border: '1px solid rgba(255,68,68,0.2)',
+            whiteSpace: 'nowrap',
+          }}>
+            {f.text}
+          </div>
+        );
+      })}
+
+      {/* 痛点数据 */}
+      <div style={{ position: 'absolute', bottom: 120, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 80 }}>
+        {[
+          { label: '返工率', val: 60, suffix: '%', delay: 0.5 },
+          { label: '需求变更', val: 3, suffix: 'x', delay: 0.7 },
+          { label: '超期项目', val: 45, suffix: '%', delay: 0.9 },
+        ].map((item, i) => (
+          <FadeIn key={i} delay={item.delay} duration={0.5}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontFamily: mono, fontSize: 56, fontWeight: 600, color: RED, lineHeight: 1 }}>
+                <CountUp from={0} to={item.val} suffix={item.suffix} />
+              </div>
+              <div style={{ fontFamily: sans, fontSize: 18, color: TEXT_DIM, marginTop: 8 }}>
+                {item.label}
+              </div>
+            </div>
+          </FadeIn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 2: 转折 → SDD (12-22s) ──
+function SceneReveal() {
+  const { t } = useSprite();
+  const p = interpolate(t, [0, 0.6], [0, 1], Easing.expoOut);
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: sans }}>
+      {/* 问题 */}
+      <FadeIn delay={0} duration={0.5}>
+        <div style={{ fontFamily: serif, fontSize: 36, color: TEXT_DIM, fontStyle: 'italic', marginBottom: 30 }}>
+          有没有更好的方式？
+        </div>
+      </FadeIn>
+
+      {/* 分隔线 */}
+      <GlowLine delay={0.4} width={300} />
+
+      {/* SDD 标题 */}
+      <FadeIn delay={0.6} duration={0.8} fromY={40}>
+        <div style={{
+          fontFamily: serif, fontSize: 80, fontWeight: 700, color: TEXT,
+          letterSpacing: '-0.03em', lineHeight: 1.1, textAlign: 'center',
+        }}>
+          Spec-Driven
+          <br />
+          <span style={{ color: ACCENT }}>Development</span>
+        </div>
+      </FadeIn>
+
+      {/* 副标题 */}
+      <FadeIn delay={1.0} duration={0.6}>
+        <div style={{
+          fontFamily: sans, fontSize: 24, color: TEXT_DIM, marginTop: 30,
+          maxWidth: 700, textAlign: 'center', lineHeight: 1.6,
+        }}>
+          在写第一行代码之前，先把「做什么、为什么做、怎么做、不做什么」说清楚
+        </div>
+      </FadeIn>
+
+      {/* 核心理念高亮 */}
+      <FadeIn delay={1.4} duration={0.6}>
+        <div style={{
+          marginTop: 50, padding: '20px 40px',
+          background: ACCENT_DIM, border: `1px solid ${ACCENT}`,
+          borderRadius: 12,
+          fontFamily: serif, fontSize: 22, color: ACCENT,
+          textAlign: 'center',
+        }}>
+          「把问题定义清楚」是 AI 时代最核心的编程竞争力
+        </div>
+      </FadeIn>
+    </div>
+  );
+}
+
+// ── Scene 3: 核心原则 (22-35s) ──
+function ScenePrinciples() {
+  const { t } = useSprite();
+
+  const principles = [
+    { num: '01', title: '50行原则', desc: '超过50行代码或涉及2个以上文件\n必须先写 Spec', delay: 0.1, accent: true },
+    { num: '02', title: 'What', desc: '必须可测试验收\n如「邮箱+密码登录，成功返回JWT」', delay: 0.4 },
+    { num: '03', title: 'Why', desc: '说明动机\n如「没有认证，所有接口裸露」', delay: 0.7 },
+    { num: '04', title: 'Constraints', desc: '技术约束具体化\n如「bcrypt加密，token 7天」', delay: 1.0 },
+    { num: '05', title: 'Non-Goals', desc: '明确排除比包含更重要\n至少列出3条不做的事', delay: 1.3, accent: true },
+  ];
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', padding: '80px 120px', fontFamily: sans }}>
+      <FadeIn delay={0} duration={0.5}>
+        <div style={{
+          fontFamily: serif, fontSize: 20, color: ACCENT, letterSpacing: '0.15em',
+          textTransform: 'uppercase', marginBottom: 12,
+        }}>
+          Core Principles
+        </div>
+      </FadeIn>
+      <FadeIn delay={0.1} duration={0.5}>
+        <div style={{ fontFamily: serif, fontSize: 52, fontWeight: 700, color: TEXT, marginBottom: 50 }}>
+          四要素 + 50行原则
+        </div>
+      </FadeIn>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 900 }}>
+        {principles.map((p, i) => (
+          <SlideIn key={i} from="left" delay={p.delay} duration={0.5}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 24,
+              padding: '20px 28px',
+              background: p.accent ? 'rgba(0,212,170,0.06)' : CARD_BG,
+              border: `1px solid ${p.accent ? ACCENT : CARD_BORDER}`,
+              borderRadius: 10,
+              transition: 'all 0.3s',
+            }}>
+              <div style={{
+                fontFamily: mono, fontSize: 14, color: p.accent ? ACCENT : TEXT_MUTED,
+                fontWeight: 600, minWidth: 32,
+              }}>
+                {p.num}
+              </div>
+              <div style={{ fontFamily: serif, fontSize: 26, fontWeight: 600, color: TEXT, minWidth: 160 }}>
+                {p.title}
+              </div>
+              <div style={{
+                fontFamily: sans, fontSize: 17, color: TEXT_DIM, lineHeight: 1.5,
+                whiteSpace: 'pre-line',
+              }}>
+                {p.desc}
+              </div>
+            </div>
+          </SlideIn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 4: 工具链 (35-45s) ──
+function SceneTools() {
+  const tools = [
+    { name: 'Spec-Kit', tag: '全新项目', desc: '宪法式约束\n团队≥3人', color: '#E8A838' },
+    { name: 'OpenSpec', tag: '存量迭代', desc: '增量规范\n低侵入', color: '#6B8DD6' },
+    { name: 'Superpowers', tag: 'Claude用户', desc: 'TDD强制\n子代理并行', color: '#D4966B' },
+    { name: 'spec-first', tag: '通用', desc: '成本最低\nAGENTS.md', color: '#8B6BD4' },
+  ];
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', padding: '80px 100px', fontFamily: sans }}>
+      <FadeIn delay={0} duration={0.5}>
+        <div style={{
+          fontFamily: serif, fontSize: 20, color: ACCENT, letterSpacing: '0.15em',
+          textTransform: 'uppercase', marginBottom: 12,
+        }}>
+          Toolchain
+        </div>
+      </FadeIn>
+      <FadeIn delay={0.1} duration={0.5}>
+        <div style={{ fontFamily: serif, fontSize: 52, fontWeight: 700, color: TEXT, marginBottom: 50 }}>
+          按需匹配，不一刀切
+        </div>
+      </FadeIn>
+
+      <div style={{ display: 'flex', gap: 24, justifyContent: 'center' }}>
+        {tools.map((tool, i) => (
+          <SlideIn key={i} from="bottom" delay={0.3 + i * 0.15} duration={0.5}>
+            <div style={{
+              width: 340, padding: '32px 28px',
+              background: CARD_BG,
+              border: `1px solid ${CARD_BORDER}`,
+              borderTop: `3px solid ${tool.color}`,
+              borderRadius: 12,
+            }}>
+              <div style={{
+                fontFamily: mono, fontSize: 12, color: tool.color,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                marginBottom: 16,
+              }}>
+                {tool.tag}
+              </div>
+              <div style={{
+                fontFamily: serif, fontSize: 32, fontWeight: 700, color: TEXT,
+                marginBottom: 16,
+              }}>
+                {tool.name}
+              </div>
+              <div style={{
+                fontFamily: sans, fontSize: 17, color: TEXT_DIM, lineHeight: 1.6,
+                whiteSpace: 'pre-line',
+              }}>
+                {tool.desc}
+              </div>
+            </div>
+          </SlideIn>
+        ))}
+      </div>
+
+      <FadeIn delay={1.0} duration={0.5}>
+        <div style={{
+          position: 'absolute', bottom: 100, left: 0, right: 0, textAlign: 'center',
+          fontFamily: serif, fontSize: 20, color: ACCENT, fontStyle: 'italic',
+        }}>
+          黄金搭档：OpenSpec + Superpowers
+        </div>
+      </FadeIn>
+    </div>
+  );
+}
+
+// ── Scene 5: 5步工作流 (45-58s) ──
+function SceneWorkflow() {
+  const steps = [
+    { num: '1', title: '项目诊断', desc: '3个问题：全新/已有？\n个人/多人？AI工具？', time: '0-3min' },
+    { num: '2', title: '代码库资产诊断', desc: '扫描项目结构\n提取技术约束', time: '3-5min' },
+    { num: '3', title: '生成 Spec', desc: 'What/Why/Constraints/Non-Goals\n写入文件', time: '10-20min' },
+    { num: '4', title: '生成执行计划', desc: '文件级变更清单\n任务级拆解', time: '5-10min' },
+    { num: '5', title: '交付检查', desc: '5个检查点确认\n用户签字后动手', time: '2-3min' },
+  ];
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', padding: '80px 100px', fontFamily: sans }}>
+      <FadeIn delay={0} duration={0.5}>
+        <div style={{
+          fontFamily: serif, fontSize: 20, color: ACCENT, letterSpacing: '0.15em',
+          textTransform: 'uppercase', marginBottom: 12,
+        }}>
+          Workflow
+        </div>
+      </FadeIn>
+      <FadeIn delay={0.1} duration={0.5}>
+        <div style={{ fontFamily: serif, fontSize: 52, fontWeight: 700, color: TEXT, marginBottom: 50 }}>
+          5步 + 5个检查点
+        </div>
+      </FadeIn>
+
+      <div style={{ display: 'flex', gap: 20, justifyContent: 'center', alignItems: 'stretch' }}>
+        {steps.map((s, i) => (
+          <SlideIn key={i} from="bottom" delay={0.2 + i * 0.12} duration={0.5}>
+            <div style={{
+              width: 300, padding: '28px 24px',
+              background: CARD_BG,
+              border: `1px solid ${CARD_BORDER}`,
+              borderRadius: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+            }}>
+              <div style={{
+                position: 'absolute', top: -16, left: 24,
+                width: 40, height: 40,
+                background: ACCENT,
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: mono, fontSize: 18, fontWeight: 700, color: BG,
+              }}>
+                {s.num}
+              </div>
+              <div style={{ marginTop: 20, fontFamily: serif, fontSize: 24, fontWeight: 700, color: TEXT, marginBottom: 12 }}>
+                {s.title}
+              </div>
+              <div style={{
+                fontFamily: sans, fontSize: 15, color: TEXT_DIM, lineHeight: 1.6,
+                whiteSpace: 'pre-line', flex: 1,
+              }}>
+                {s.desc}
+              </div>
+              <div style={{
+                marginTop: 16, fontFamily: mono, fontSize: 13, color: ACCENT,
+              }}>
+                {s.time}
+              </div>
+            </div>
+          </SlideIn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 6: 四层验证 (58-68s) ──
+function SceneValidation() {
+  const layers = [
+    { num: 'L1', title: 'Spec文本验证', desc: 'validate-spec.py', detail: '四要素完整性\nNon-Goals≥3条' },
+    { num: 'L2', title: 'Spec同行评审', desc: 'peer-review-spec.py', detail: '评分≥80分(B级)\n才能进入执行' },
+    { num: 'L3', title: '代码一致性', desc: 'check-code-consistency.py', detail: '技术选型/接口路径\n数据模型是否冲突' },
+    { num: 'L4', title: 'Spec漂移检测', desc: 'detect-spec-drift.py', detail: '范围蔓延/接口签名\n定期自动检测' },
+  ];
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative', padding: '80px 100px', fontFamily: sans }}>
+      <FadeIn delay={0} duration={0.5}>
+        <div style={{
+          fontFamily: serif, fontSize: 20, color: ACCENT, letterSpacing: '0.15em',
+          textTransform: 'uppercase', marginBottom: 12,
+        }}>
+          Validation
+        </div>
+      </FadeIn>
+      <FadeIn delay={0.1} duration={0.5}>
+        <div style={{ fontFamily: serif, fontSize: 52, fontWeight: 700, color: TEXT, marginBottom: 50 }}>
+          四层验证体系
+        </div>
+      </FadeIn>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 1000, margin: '0 auto' }}>
+        {layers.map((l, i) => (
+          <SlideIn key={i} from="right" delay={0.2 + i * 0.15} duration={0.5}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 28,
+              padding: '22px 32px',
+              background: CARD_BG,
+              border: `1px solid ${CARD_BORDER}`,
+              borderLeft: `4px solid ${ACCENT}`,
+              borderRadius: 10,
+            }}>
+              <div style={{
+                fontFamily: mono, fontSize: 22, fontWeight: 700, color: ACCENT,
+                minWidth: 50,
+              }}>
+                {l.num}
+              </div>
+              <div style={{ minWidth: 200 }}>
+                <div style={{ fontFamily: serif, fontSize: 24, fontWeight: 600, color: TEXT, marginBottom: 4 }}>
+                  {l.title}
+                </div>
+                <div style={{ fontFamily: mono, fontSize: 14, color: ACCENT }}>
+                  {l.desc}
+                </div>
+              </div>
+              <div style={{
+                fontFamily: sans, fontSize: 16, color: TEXT_DIM, lineHeight: 1.5,
+                whiteSpace: 'pre-line', flex: 1, textAlign: 'right',
+              }}>
+                {l.detail}
+              </div>
+            </div>
+          </SlideIn>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 7: 结尾 CTA (68-75s) ──
+function SceneOutro() {
+  const { t } = useSprite();
+  const scale = interpolate(t, [0, 0.5], [0.9, 1], Easing.overshoot);
+
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      fontFamily: sans,
+    }}>
+      <div style={{ transform: `scale(${scale})`, textAlign: 'center' }}>
+        <FadeIn delay={0} duration={0.6}>
+          <div style={{
+            fontFamily: serif, fontSize: 52, fontWeight: 700, color: TEXT,
+            lineHeight: 1.3, maxWidth: 900,
+          }}>
+            未来的编程竞争
+            <br />
+            <span style={{ color: ACCENT }}>不是谁写代码快</span>
+            <br />
+            而是谁能把问题定义得更清楚
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.6} duration={0.5}>
+          <div style={{
+            marginTop: 50,
+            padding: '16px 48px',
+            background: ACCENT,
+            borderRadius: 8,
+            fontFamily: mono, fontSize: 20, fontWeight: 600, color: BG,
+            letterSpacing: '0.05em',
+            display: 'inline-block',
+          }}>
+            Spec-Driven Development
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.8} duration={0.5}>
+          <div style={{
+            marginTop: 30,
+            fontFamily: sans, fontSize: 18, color: TEXT_MUTED,
+          }}>
+            先签字，后动手
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.9} duration={0.5}>
+          <div style={{
+            marginTop: 20,
+            fontFamily: mono, fontSize: 16, color: ACCENT,
+            letterSpacing: '0.02em',
+            padding: '8px 20px',
+            border: `1px solid ${ACCENT}`,
+            borderRadius: 6,
+            display: 'inline-block',
+          }}>
+            github.com/ShiXiangYu2/spec-driven-dev
+          </div>
+        </FadeIn>
+      </div>
+    </div>
+  );
+}
+
+// ── 连接箭头 (用于场景之间) ──
+function ConnectorArrow({ start, end, y = 540 }) {
+  const { time } = useTime();
+  if (time < start || time >= end) return null;
+  const localT = (time - start) / (end - start);
+  const opacity = localT < 0.2 ? localT / 0.2 : localT > 0.8 ? (1 - localT) / 0.2 : 1;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: '50%', top: y,
+      transform: 'translateX(-50%)',
+      opacity,
+    }}>
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+        <path d="M20 5 L20 30 M10 22 L20 32 L30 22" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
+// ── 水印 ──
+function Watermark() {
+  return (
+    <div style={{
+      position: 'absolute', bottom: 24, right: 32,
+      fontSize: 11, color: 'rgba(255,255,255,0.25)',
+      letterSpacing: '0.15em', fontFamily: 'monospace',
+      pointerEvents: 'none', zIndex: 50,
+    }}>
+      Created by Huashu-Design
+    </div>
+  );
+}
+
+// ═══════ 主场景 ═══════
+function App() {
+  return (
+    <Stage duration={DURATION} width={1920} height={1080} bgColor={BG} loop={true}>
+      {/* Scene 1: 混乱问题 0-12s */}
+      <Sprite start={0} end={12}>
+        <SceneChaos />
+      </Sprite>
+
+      {/* Scene 2: 转折 12-22s */}
+      <Sprite start={12} end={22}>
+        <SceneReveal />
+      </Sprite>
+
+      {/* Scene 3: 核心原则 22-35s */}
+      <Sprite start={22} end={35}>
+        <ScenePrinciples />
+      </Sprite>
+
+      {/* Scene 4: 工具链 35-45s */}
+      <Sprite start={35} end={45}>
+        <SceneTools />
+      </Sprite>
+
+      {/* Scene 5: 工作流 45-58s */}
+      <Sprite start={45} end={58}>
+        <SceneWorkflow />
+      </Sprite>
+
+      {/* Scene 6: 验证 58-68s */}
+      <Sprite start={58} end={68}>
+        <SceneValidation />
+      </Sprite>
+
+      {/* Scene 7: 结尾 68-75s */}
+      <Sprite start={68} end={75}>
+        <SceneOutro />
+      </Sprite>
+
+      {/* 全程水印 */}
+      <Sprite start={0} end={75}>
+        <Watermark />
+      </Sprite>
+    </Stage>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
